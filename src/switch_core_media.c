@@ -9014,6 +9014,16 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_activate_rtp(switch_core_sessi
 		switch_channel_set_variable(session->channel, SWITCH_REMOTE_MEDIA_IP_VARIABLE, a_engine->cur_payload_map->remote_sdp_ip);
 		switch_channel_set_variable(session->channel, SWITCH_REMOTE_MEDIA_PORT_VARIABLE, tmp);
 
+		//添加早期媒体录音标识
+		if (switch_event_create_subclass(&event,SWITCH_EVENT_CUSTOM,"record_flag") == SWITCH_STATUS_SUCCESS)
+		{
+			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Unique-ID", switch_core_session_get_uuid(session));
+			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "state", "pre_answer_record");
+			if(switch_channel_get_variable(session->channel,"call_type")){
+				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "call_type", switch_channel_get_variable(session->channel,"call_type"));
+			}
+			switch_event_fire(&event);
+		}
 
 	text:
 
