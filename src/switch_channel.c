@@ -1134,7 +1134,57 @@ SWITCH_DECLARE(switch_status_t) switch_channel_set_name(switch_channel_t *channe
 	}
 	channel->name = NULL;
 	if (name) {
-		char *uuid = switch_core_session_get_uuid(channel->session);
+		char *use_uuid = switch_core_session_get_uuid(channel->session);
+		char *uuid = NULL; 
+		//呼入时 添加 C+%Y%m%d+UUID为固定前缀 
+		if (use_uuid[0] == 'A' || use_uuid[0] == 'C') {
+			switch_log_printf(SWITCH_CHANNEL_CHANNEL_LOG(channel), SWITCH_LOG_DEBUG, "%s not set UUID%s\n",
+							  switch_channel_get_name(channel), use_uuid);
+		}else{
+			switch_time_exp_t tm;
+			char date[80] = "";
+			switch_size_t retsize;
+			switch_time_t ts = switch_micro_time_now();
+			switch_time_exp_lt(&tm, ts);
+			switch_strftime_nocheck(date, &retsize, sizeof(date), "%Y%m%d", &tm);
+			if (strstr(name, "external") != NULL) {
+				char new_uuid[SWITCH_UUID_FORMATTED_LENGTH + 10]; 
+				char temp_uuid[SWITCH_UUID_FORMATTED_LENGTH + 10];
+			     snprintf(temp_uuid, sizeof(temp_uuid), "C%s%s", date,use_uuid);
+			        
+		          // 替换'-'为'0'
+		          for(int i = 0; temp_uuid[i]; i++) {
+		              if(temp_uuid[i] == '-') {
+		                  temp_uuid[i] = '0';
+		              }
+		          }
+			        
+			     snprintf(new_uuid, sizeof(new_uuid), "%s", temp_uuid);
+				if (switch_core_session_set_uuid(channel->session, new_uuid) == SWITCH_STATUS_SUCCESS) {
+					switch_log_printf(SWITCH_CHANNEL_CHANNEL_LOG(channel), SWITCH_LOG_DEBUG, "%s set UUID=%s\n",
+									  switch_channel_get_name(channel), new_uuid);
+				 }
+			} else if (strstr(name, "internal") != NULL) {
+				char new_uuid[SWITCH_UUID_FORMATTED_LENGTH + 10];
+			        char temp_uuid[SWITCH_UUID_FORMATTED_LENGTH + 10];
+			        snprintf(temp_uuid, sizeof(temp_uuid), "A%s%s", date,use_uuid);
+			        
+			        // 替换'-'为'0'
+			        for(int i = 0; temp_uuid[i]; i++) {
+			            if(temp_uuid[i] == '-') {
+			                temp_uuid[i] = '0';
+			            }
+			        }
+			        
+			        snprintf(new_uuid, sizeof(new_uuid), "%s", temp_uuid);
+				if (switch_core_session_set_uuid(channel->session, new_uuid) == SWITCH_STATUS_SUCCESS) {
+					switch_log_printf(SWITCH_CHANNEL_CHANNEL_LOG(channel), SWITCH_LOG_DEBUG, "%s set UUID=%s\n",
+									  switch_channel_get_name(channel), new_uuid);
+				}
+			}
+		}
+
+		uuid = switch_core_session_get_uuid(channel->session);
 		channel->name = switch_core_session_strdup(channel->session, name);
 		switch_channel_set_variable(channel, SWITCH_CHANNEL_NAME_VARIABLE, name);
 		if (old) {
@@ -4638,9 +4688,17 @@ SWITCH_DECLARE(switch_status_t) switch_channel_set_timestamps(switch_channel_t *
 		}
 
 		if (caller_profile->times->progress_media) {
-			switch_time_exp_lt(&tm, caller_profile->times->progress_media);
-			switch_strftime_nocheck(progress_media, &retsize, sizeof(progress_media), fmt, &tm);
-			switch_channel_set_variable(channel, "progress_media_stamp", progress_media);
+			// add recv 180 no sdp,progress_media_stamp = progress_stamp
+			if (caller_profile->times->progress) {
+				switch_time_exp_lt(&tm, caller_profile->times->progress);
+				switch_strftime_nocheck(progress, &retsize, sizeof(progress), fmt, &tm);
+				switch_channel_set_variable(channel, "progress_media_stamp", progress);
+			}else{
+				switch_time_exp_lt(&tm, caller_profile->times->progress_media);
+			    switch_strftime_nocheck(progress_media, &retsize, sizeof(progress_media), fmt, &tm);
+				switch_channel_set_variable(channel, "progress_media_stamp", progress_media);
+			}
+			//end
 		}
 
 		if (channel->hold_record) {
