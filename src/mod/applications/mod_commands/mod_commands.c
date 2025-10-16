@@ -3979,12 +3979,23 @@ SWITCH_STANDARD_API(sched_broadcast_function)
 	return SWITCH_STATUS_SUCCESS;
 }
 
+void remove_curly_brace_content(char *uuid) {
+    char *start = strchr(uuid, '{');
+    if (start != NULL) {
+        char *end = strchr(start, '}');
+        if (end != NULL) {
+            memmove(start, end + 1, strlen(end + 1) + 1);
+        }
+    }
+}
+
 #define HOLD_SYNTAX "[off|toggle] <uuid> [<display>]"
 SWITCH_STANDARD_API(uuid_hold_function)
 {
 	char *mycmd = NULL, *argv[4] = { 0 };
 	int argc = 0;
 	switch_status_t status = SWITCH_STATUS_FALSE;
+	char *uuid = NULL;
 
 	if (!zstr(cmd) && (mycmd = strdup(cmd))) {
 		argc = switch_separate_string(mycmd, ' ', argv, (sizeof(argv) / sizeof(argv[0])));
@@ -3994,11 +4005,17 @@ SWITCH_STANDARD_API(uuid_hold_function)
 		stream->write_function(stream, "-USAGE: %s\n", HOLD_SYNTAX);
 	} else {
 		if (!strcasecmp(argv[0], "off")) {
-			status = switch_ivr_unhold_uuid(argv[1]);
+			//status = switch_ivr_unhold_uuid(argv[1]);
+			uuid = argv[1];
+			remove_curly_brace_content(uuid);
+			status = switch_ivr_unhold_uuid(uuid);
 		} else if (!strcasecmp(argv[0], "toggle")) {
 			status = switch_ivr_hold_toggle_uuid(argv[1], argv[2], 1);
 		} else {
-			status = switch_ivr_hold_uuid(argv[0], argv[1], 1);
+			//status = switch_ivr_hold_uuid(argv[0], argv[1], 1);
+			uuid = argv[0];
+			remove_curly_brace_content(uuid);
+			status = switch_ivr_hold_uuid(uuid, argv[1], 1);
 		}
 	}
 
@@ -4743,7 +4760,7 @@ SWITCH_STANDARD_API(session_record_function)
 {
 	switch_core_session_t *rsession = NULL;
 	char *mycmd = NULL, *argv[5] = { 0 };
-	char *uuid = NULL, *action = NULL, *path = NULL;
+	char *uuid = NULL, *action = NULL, *path = NULL, *recording_vars = NULL;
 	int argc = 0;
 	uint32_t limit = 0;
 	switch_event_t *vars = NULL;
@@ -4765,6 +4782,7 @@ SWITCH_STANDARD_API(session_record_function)
 	action = argv[1];
 	path = argv[2];
 	limit = argv[3] ? atoi(argv[3]) : 0;
+	recording_vars = argv[4];
 
 	if (zstr(uuid) || zstr(action) || zstr(path)) {
 		goto usage;
@@ -4776,9 +4794,25 @@ SWITCH_STANDARD_API(session_record_function)
 	}
 
 	if (!strcasecmp(action, "start")) {
-		if(argc > 3) {
-			switch_url_decode(argv[4]);
-			switch_event_create_brackets(argv[4], '{', '}',',', &vars, &new_fp, SWITCH_FALSE);
+		if (argc > 3 && recording_vars) {
+			int argc_vars = 0;
+			char *var_name, *var_value = NULL;
+			int x = 0;
+			char *argv_vars[64] = {0};
+			switch_channel_t *channel = switch_core_session_get_channel(rsession);
+			argc_vars =switch_separate_string(recording_vars, ';', argv_vars, (sizeof(argv_vars) / sizeof(argv_vars[0])));
+			for (x = 0; x < argc_vars; x++) {
+				var_name = argv_vars[x];
+				if (var_name && (var_value = strchr(var_name, '='))) { *var_value++ = '\0'; }
+				if (zstr(var_name)) {
+					switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rsession), SWITCH_LOG_ERROR,
+									  "No variable name specified.\n");
+				} else {
+					switch_channel_set_variable(channel, var_name, var_value);
+				}
+			}
+			//switch_url_decode(argv[4]);
+			//switch_event_create_brackets(argv[4], '{', '}', ',', &vars, &new_fp, SWITCH_FALSE);
 		}
 		if (switch_ivr_record_session_event(rsession, path, limit, NULL, vars) != SWITCH_STATUS_SUCCESS) {
 			stream->write_function(stream, "-ERR Cannot record session!\n");
@@ -5377,6 +5411,7 @@ static void *SWITCH_THREAD_FUNC bgapi_exec(switch_thread_t *thread, void *obj)
 	char *reply, *freply = NULL;
 	switch_event_t *event;
 	char *arg;
+	char *new_str = NULL;
 	switch_memory_pool_t *pool;
 
 	if (!job) {
@@ -5393,7 +5428,20 @@ static void *SWITCH_THREAD_FUNC bgapi_exec(switch_thread_t *thread, void *obj)
 		*arg++ = '\0';
 	}
 
-	if (switch_api_execute(job->cmd, arg, NULL, &stream) == SWITCH_STATUS_SUCCESS) {
+	if (arg) {
+		new_str = malloc(strlen(arg) + 1); // +1 for null terminator
+		if (new_str) { strcpy(new_str, arg); }
+
+		if (strcasecmp(job->cmd, "originate") && strcasecmp(job->cmd, "uuid_send_media")) {
+			char *start = strchr(new_str, '}');
+			if (start != NULL) {
+				start++; // 移动到 '}' 之后的字符
+				memmove(new_str, start, strlen(start) + 1);
+			}
+		}
+	}
+
+	if (switch_api_execute(job->cmd, new_str?new_str:arg, NULL, &stream) == SWITCH_STATUS_SUCCESS) {
 		reply = stream.data;
 	} else {
 		freply = switch_mprintf("%s: Command not found!\n", job->cmd);
@@ -5407,16 +5455,89 @@ static void *SWITCH_THREAD_FUNC bgapi_exec(switch_thread_t *thread, void *obj)
 	if (switch_event_create(&event, SWITCH_EVENT_BACKGROUND_JOB) == SWITCH_STATUS_SUCCESS) {
 		switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Job-UUID", job->uuid_str);
 		switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Job-Command", job->cmd);
-		if (arg) {
-			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Job-Command-Arg", arg);
+		if (arg) { switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Job-Command-Arg", arg); }
+		if (arg) { 
+			int call_type = 0;
+			char *start_ptr, *end_ptr;
+			//switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Job-Command-Arg", arg);
+			start_ptr = strstr(arg, "call_type=");
+			if (start_ptr != NULL) {
+				size_t len ;
+				char *temp ;
+				char call_typ[32];
+				// 移动指针到 "=" 后面的位置
+				start_ptr += strlen("call_type=");
+
+				// 查找第一个非数字字符的位置，也就是值的结束位置
+				end_ptr = start_ptr;
+				while (*end_ptr >= '0' && *end_ptr <= '9') { end_ptr++; }
+
+				// 提取 call_type 的值
+				len = end_ptr - start_ptr;
+				temp = (char *)malloc(len + 1);
+
+				strncpy(temp, start_ptr, len);
+				temp[len] = '\0'; // 添加字符串结束符
+
+				call_type = atoi(temp);
+				
+				snprintf(call_typ, sizeof(call_typ), "%d", call_type);
+				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "variable_call_type", call_typ); 
+				switch_safe_free(temp)
+			}
 		}
 
 		switch_event_add_body(event, "%s", reply);
 		switch_event_fire(&event);
 	}
 
+	if (strstr(reply, "INVALID_GATEWAY") != NULL || strstr(reply, "GATEWAY_DOWN") != NULL || strstr(reply, "INVALID_URL") != NULL) {
+		switch_event_t *event = NULL;
+		char *argv[256] = {0};
+		int i,argc = 0;
+		if (switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, "GATEWAY_ERR") == SWITCH_STATUS_SUCCESS) {
+			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Job-UUID", job->uuid_str);
+			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Job-Command", job->cmd);
+			if (arg) { 
+				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Job-Command-Arg", arg);
+				argc = switch_separate_string_string(arg, ",", argv, (sizeof(argv) / sizeof(argv[0])));
+				for (i = 0; i < argc; i++) {
+					if (strstr(argv[i], "origination_uuid") || strstr(argv[i], "call_type")) {
+						const char *equals_sign = strchr(argv[i], '=');
+
+						char output[256];
+						if (equals_sign != NULL) {
+							const char *start = equals_sign + 1;
+							const char *end = strchr(start, '}');
+
+							if (end == NULL) {
+								// 如果没有找到 '}'，复制整个字符串
+								strcpy(output, start);
+							} else {
+								// 找到了 '}'，只复制到 '}' 之前的部分
+								size_t length = end - start;
+								strncpy(output, start, length);
+								output[length] = '\0'; // 确保字符串正确终止
+							}
+						} else {
+							output[0] = '\0'; // 如果没有找到等号，则返回空字符串
+						}
+						
+							if (strstr(argv[i], "origination_uuid")){
+								switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Unique-ID", output);
+							}else{
+								switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "variable_call_type", output);
+							}
+					}
+				}
+			}
+			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "status", reply);
+			switch_event_fire(&event);
+		}
+	}	
 	switch_safe_free(stream.data);
 	switch_safe_free(freply);
+	switch_safe_free(new_str);
 
 	job = NULL;
 	switch_core_destroy_memory_pool(&pool);
@@ -6237,7 +6358,7 @@ SWITCH_STANDARD_API(uuid_exists_function)
 		exists = switch_ivr_uuid_exists(cmd);
 	}
 
-	stream->write_function(stream, "%s", exists ? "true" : "false");
+	stream->write_function(stream, "%s\n", exists ? "true" : "false");
 
 	return SWITCH_STATUS_SUCCESS;
 }
