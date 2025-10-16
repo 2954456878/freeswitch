@@ -4764,7 +4764,7 @@ SWITCH_STANDARD_API(session_record_function)
 	int argc = 0;
 	uint32_t limit = 0;
 	switch_event_t *vars = NULL;
-	char *new_fp = NULL;
+	//char *new_fp = NULL;
 
 	if (zstr(cmd)) {
 		goto usage;
