@@ -620,11 +620,28 @@ SWITCH_DECLARE(void) switch_core_session_run(switch_core_session_t *session)
 			case CS_INIT:		/* Basic setup tasks */
 				{
 					switch_event_t *event;
-
+					char *uuid = NULL;
 					STATE_MACRO(init, "INIT");
 
 					if (switch_event_create(&event, SWITCH_EVENT_CHANNEL_CREATE) == SWITCH_STATUS_SUCCESS) {
 						switch_channel_event_set_data(session->channel, event);
+						if (!switch_channel_get_variable(session->channel, "call_type")) {
+							uuid = switch_core_session_get_uuid(session);
+							if (uuid[0] == 'A'){
+								switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "variable_call_type", "3");
+								switch_channel_set_variable(session->channel, "call_type", "3");
+							} else if (uuid[0] == 'C'){
+								switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "variable_call_type", "6");
+								switch_channel_set_variable(session->channel, "call_type", "6");
+							}
+						}
+						if(switch_event_get_header_nil(event, "Caller-Caller-ID-Number")){
+							switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "variable_caller_number", switch_event_get_header_nil(event, "Caller-Caller-ID-Number"));
+						}
+
+						if(switch_event_get_header_nil(event, "Caller-Destination-Number")){
+							switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "variable_DID", switch_event_get_header_nil(event, "Caller-Destination-Number"));
+						}
 						switch_event_fire(&event);
 					}
 
