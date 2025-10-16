@@ -672,13 +672,20 @@ SWITCH_STANDARD_APP(rename_function)
 
 	if (!zstr(data) && (lbuf = switch_core_session_strdup(session, data))
 		&& switch_split(lbuf, ' ', argv) == 2) {
-
+		switch_time_t start_time = switch_micro_time_now();
 		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "%s RENAME: %s %s\n",
 						  switch_channel_get_name(switch_core_session_get_channel(session)), argv[0], argv[1]);
 
-		if (switch_file_rename(argv[0], argv[1], switch_core_session_get_pool(session)) != SWITCH_STATUS_SUCCESS) {
+		//if (switch_file_rename(argv[0], argv[1], switch_core_session_get_pool(session)) != SWITCH_STATUS_SUCCESS) {
+		if (switch_file_copy(argv[0], argv[1], switch_core_session_get_pool(session)) != SWITCH_STATUS_SUCCESS) {
 			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "%s Can't rename %s to %s\n",
 							switch_channel_get_name(switch_core_session_get_channel(session)), argv[0], argv[1]);
+		} else {
+			int elapsed_ms = (switch_micro_time_now() - start_time)/1000;
+			
+			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "%s RENAME +OK: %s %s , elapsed : %d ms\n",
+						  switch_channel_get_name(switch_core_session_get_channel(session)), argv[0], argv[1] , elapsed_ms);
+		 	switch_file_remove(argv[0], switch_core_session_get_pool(session));
 		}
 
 	} else {
@@ -1410,8 +1417,11 @@ SWITCH_STANDARD_APP(wait_for_answer_function)
 {
 	switch_channel_t *channel = switch_core_session_get_channel(session);
 	switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Waiting for answer\n");
-	while (!switch_channel_test_flag(channel, CF_ANSWERED) && switch_channel_ready(channel)) {
-		switch_ivr_sleep(session, 100, SWITCH_TRUE, NULL);
+	// while (!switch_channel_test_flag(channel, CF_ANSWERED) && switch_channel_ready(channel)) {
+	// 	switch_ivr_sleep(session, 100, SWITCH_TRUE, NULL);
+	// }
+	while (!switch_channel_media_up(channel) && !switch_core_session_get_read_codec(session) && switch_channel_ready(channel)) {
+		switch_ivr_sleep(session, 100, SWITCH_FALSE, NULL);
 	}
 }
 
