@@ -3234,6 +3234,7 @@ auth_res_t sofia_reg_parse_auth(sofia_profile_t *profile,
 		for (param = switch_xml_child(uparams, "param"); param; param = param->next) {
 			const char *var = switch_xml_attr_soft(param, "name");
 			const char *val = switch_xml_attr_soft(param, "value");
+			char *vall = NULL;
 
 			if (!strcasecmp(var, "sip-forbid-register") && switch_true(val)) {
 				ret = AUTH_FORBIDDEN;
@@ -3259,6 +3260,9 @@ auth_res_t sofia_reg_parse_auth(sofia_profile_t *profile,
 			}
 			if (!strcasecmp(var, "user-agent-filter")) {
 				user_agent_filter = val;
+			}
+			if ((vall = switch_core_get_variable_dup("user-agent-filter"))) { 
+				user_agent_filter = vall;
 			}
 			if (!strcasecmp(var, "max-registrations-per-extension")) {
 				max_registrations_perext = atoi(val);
